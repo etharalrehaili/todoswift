@@ -13,7 +13,7 @@ struct Todo: Codable, CustomStringConvertible {
     }
 
     var description: String {
-        let box = isCompleted ? "[x]" : "[ ]"
+        let box = isCompleted ? "✅" : "❌"
         return "\(box) \(title)"
     }
 }
@@ -51,7 +51,7 @@ final class JSONFileManagerCache: Cache {
             try data.write(to: fileURL, options: [.atomic])
             return true
         } catch {
-            fputs("Save error: \(error)\n", stderr)
+            fputs("⚠️ Save error: \(error)\n", stderr)
             return false
         }
     }
@@ -65,7 +65,7 @@ final class JSONFileManagerCache: Cache {
             if data.isEmpty { return nil }
             return try JSONDecoder().decode([Todo].self, from: data)
         } catch {
-            fputs("Load error: \(error)\n", stderr)
+            fputs("⚠️ Load error: \(error)\n", stderr)
             return nil
         }
     }
@@ -90,6 +90,9 @@ final class TodosManager {
     private var todos: [Todo]
     private let cache: Cache
 
+    // quick check for UI flow
+    var hasTodos: Bool { !todos.isEmpty }
+
     // initialization
     init(cache: Cache) {
         self.cache = cache
@@ -108,11 +111,12 @@ final class TodosManager {
     // display all todos
     func listTodos() {
         if todos.isEmpty {
-            print("No todos yet. Use 'add <title>' to create one.")
+            print("📝 No todos yet. Use 'add' to create one.")
             return
         }
+        print("📝 Your todos:")
         for (i, todo) in todos.enumerated() {
-            let box = todo.isCompleted ? "[x]" : "[ ]"
+            let box = todo.isCompleted ? "✅" : "❌"
             print("\(i + 1). \(box) \(todo.title)")
         }
     }
@@ -120,7 +124,7 @@ final class TodosManager {
     // alter the completion status of a specific todo using its index
     func toggleCompletion(at index: Int) {
         guard todos.indices.contains(index) else {
-            print("Invalid index.")
+            print("⚠️ Invalid index.")
             return
         }
         todos[index].isCompleted.toggle()
@@ -130,7 +134,7 @@ final class TodosManager {
     // remove a todo using its index
     func deleteTodo(at index: Int) {
         guard todos.indices.contains(index) else {
-            print("Invalid index.")
+            print("⚠️ Invalid index.")
             return
         }
         todos.remove(at: index)
@@ -147,57 +151,36 @@ final class App {
     }
 
     // command enum helps interpret and execute user-entered commands
-    enum Command {
-        case add(String)
-        case list
-        case toggle(Int)
-        case delete(Int)
-        case help
-        case exit
+    enum Command: String {
+        case add, list, toggle, delete, exit, help
     }
 
-    private func parse(_ line: String) -> Command {
-        let parts = line.split(
-            separator: " ",
-            maxSplits: 1,
-            omittingEmptySubsequences: true
-        )
-        guard let first = parts.first?.lowercased() else { return .help }
-        switch first {
-        case "add":
-            let title = parts.count > 1 ? String(parts[1]) : ""
-            return .add(title)
-        case "list":
-            return .list
-        case "toggle":
-            if parts.count > 1, let n = Int(parts[1].trimmingCharacters(in: .whitespaces)), n > 0 {
-                return .toggle(n - 1)
-            }
-            return .help
-        case "delete", "del", "rm":
-            if parts.count > 1, let n = Int(parts[1].trimmingCharacters(in: .whitespaces)), n > 0 {
-                return .delete(n - 1)
-            }
-            return .help
-        case "help", "?":
-            return .help
-        case "exit", "quit", "q":
-            return .exit
-        default:
-            return .help
+    private func prompt(_ text: String) -> String? {
+        print(text, terminator: "")
+        return readLine()
+    }
+
+    private func parseCommand(_ input: String) -> Command? {
+        switch input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case "add", "a": return .add
+            case "list", "l": return .list
+            case "toggle", "t": return .toggle
+            case "delete", "del", "d", "rm": return .delete
+            case "exit", "quit", "q": return .exit
+            case "help", "h", "?": return .help
+            default: return nil
         }
     }
 
-    private func printHelp() {
+    private func printMenu() {
         print(
             """
-            Available commands:
-            - add <title>    Add a new todo
-            - list            List all todos
-            - toggle <n>     Toggle completion for item n
-            - delete <n>     Delete item n
-            - help            Show this help
-            - exit            Quit
+            ❓ Available commands:
+            - add       ➕ Add a new todo
+            - list      📋 List all todos
+            - toggle    🔁 Toggle completion for an item
+            - delete    🗑️ Delete an item
+            - exit      ❌ Quit
             """
         )
     }
@@ -205,35 +188,54 @@ final class App {
     // for keeping the application running and listening to user commands
     // await user input and execute commands
     func run() {
-        print("Simple Todos — type 'help' for commands.")
-        manager.listTodos()
+        print("🗒️ Simple Todos")
+        printMenu()
         while true {
-            print("> ", terminator: "")
-            guard let line = readLine() else {
-                print("\nExiting.")
+            guard let cmdLine = prompt("> Enter command (add, list, toggle, delete, exit): ") else {
+                print("\n👋 Exiting.")
                 break
             }
-            let command = parse(line)
+            guard let command = parseCommand(cmdLine) else {
+                print("⚠️ Unknown command. Type one of: add, list, toggle, delete, exit")
+                continue
+            }
             switch command {
-            case .add(let title):
-                if title
-                    .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    print("Please provide a title: add <title>")
-                } else {
+                case .add:
+                    guard let title = prompt("Enter title: "),
+                          !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                        print("⚠️ Title cannot be empty.")
+                        continue
+                    }
                     let todo = manager.addTodo(title)
-                    print("Added: \(todo.title)")
-                }
-            case .list:
-                manager.listTodos()
-            case .toggle(let idx):
-                manager.toggleCompletion(at: idx)
-            case .delete(let idx):
-                manager.deleteTodo(at: idx)
-            case .help:
-                printHelp()
-            case .exit:
-                print("Goodbye!")
-                return
+                    print("🎉 Added: \(todo.title)")
+                case .list:
+                    manager.listTodos()
+                case .toggle:
+                    guard let input = prompt("Enter item number to toggle: "),
+                          let n = Int(input.trimmingCharacters(in: .whitespaces)), n > 0 else {
+                        print("⚠️ Please enter a valid number greater than 0.")
+                        continue
+                    }
+                    manager.toggleCompletion(at: n - 1)
+                    print("🔁 Toggled item #\(n)")
+                case .delete:
+                    // List todos first, then ask for number
+                    manager.listTodos()
+                    if !manager.hasTodos {
+                        continue
+                    }
+                    guard let input = prompt("Enter item number to delete: "),
+                          let n = Int(input.trimmingCharacters(in: .whitespaces)), n > 0 else {
+                        print("⚠️ Please enter a valid number greater than 0.")
+                        continue
+                    }
+                    manager.deleteTodo(at: n - 1)
+                    print("🗑️ Deleted item #\(n)")
+                case .exit:
+                    print("👋 Goodbye!")
+                    return
+                case .help:
+                    printMenu()
             }
         }
     }
